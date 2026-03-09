@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>语音输入</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 400px;
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            margin-top: 20px;
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 24px;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 30px;
+        }
+
+        .result-box {
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 20px;
+            min-height: 150px;
+            margin-bottom: 30px;
+            border: 2px solid #e9ecef;
+        }
+
+        .result-label {
+            font-size: 12px;
+            color: #999;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .result-text {
+            font-size: 18px;
+            color: #333;
+            line-height: 1.6;
+            word-wrap: break-word;
+        }
+
+        .result-text.placeholder {
+            color: #aaa;
+            font-style: italic;
+        }
+
+        .mic-button {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            border: none;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            font-size: 48px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto;
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
+            transition: all 0.3s ease;
+            -webkit-tap-highlight-color: transparent;
+            user-select: none;
+            touch-action: manipulation;
+        }
+
+        .mic-button:active {
+            transform: scale(0.95);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .mic-button.recording {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0% {
+                box-shadow: 0 0 0 0 rgba(245, 87, 108, 0.7);
+            }
+            70% {
+                box-shadow: 0 0 0 30px rgba(245, 87, 108, 0);
+            }
+            100% {
+                box-shadow: 0 0 0 0 rgba(245, 87, 108, 0);
+            }
+        }
+
+        .hint {
+            text-align: center;
+            margin-top: 20px;
+            color: #666;
+            font-size: 14px;
+        }
+
+        .status {
+            text-align: center;
+            margin-top: 15px;
+            font-size: 14px;
+            color: #667eea;
+            font-weight: 500;
+            min-height: 20px;
+        }
+
+        .error {
+            color: #f5576c;
+        }
+
+        .success {
+            color: #28a745;
+        }
+
+        /* 适配 iPhone X 及以上机型的刘海屏 */
+        @supports (padding-top: env(safe-area-inset-top)) {
+            body {
+                padding-top: env(safe-area-inset-top);
+                padding-bottom: env(safe-area-inset-bottom);
+            }
+        }
+
+        /* 防止微信浏览器字体大小调整 */
+        body * {
+            max-height: 1000000px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎤 语音输入</h1>
+        <p class="subtitle">按住麦克风按钮开始录音</p>
+        
+        <div class="result-box">
+            <div class="result-label">识别结果</div>
+            <div class="result-text placeholder" id="resultText">语音内容将显示在这里...</div>
+        </div>
+
+        <button class="mic-button" id="micBtn" ontouchstart="return false;">🎙️</button>
+        
+        <div class="status" id="status"></div>
+        <div class="hint">按住录音，松开结束</div>
+    </div>
+
+    <script>
+        (function() {
+            const micBtn = document.getElementById('micBtn');
+            const resultText = document.getElementById('resultText');
+            const statusDiv = document.getElementById('status');
+            
+            let recognition = null;
+            let isRecording = false;
+            let finalTranscript = '';
+
+            // 检查浏览器是否支持语音识别
+            function initSpeechRecognition() {
+                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                const ua = navigator.userAgent.toLowerCase();
+                const isWechat = ua.indexOf('micromessenger') !== -1;
+                
+                if (isWechat) {
+                    showStatus('请点击右上角"..."，选择"在Safari/浏览器中打开"', 'error');
+                    micBtn.disabled = true;
+                    micBtn.style.opacity = '0.5';
+                    
+                    // 显示提示信息
+                    resultText.innerHTML = '<span style="color:#f5576c;font-size:16px;">微信内置浏览器不支持语音功能<br><br>请点击右上角"┇"<br>选择"在Safari中打开"</span>';
+                    resultText.classList.remove('placeholder');
+                    return false;
+                }
+                
+                if (!SpeechRecognition) {
+                    showStatus('您的浏览器不支持语音识别功能', 'error');
+                    micBtn.disabled = true;
+                    micBtn.style.opacity = '0.5';
+                    return false;
+                }
+
+                recognition = new SpeechRecognition();
+                recognition.continuous = true;
+                recognition.interimResults = true;
+                recognition.lang = 'zh-CN';
+
+                recognition.onstart = function() {
+                    isRecording = true;
+                    micBtn.classList.add('recording');
+                    showStatus('正在录音...', 'success');
+                };
+
+                recognition.onresult = function(event) {
+                    let interimTranscript = '';
+                    
+                    for (let i = event.resultIndex; i < event.results.length; i++) {
+                        const transcript = event.results[i][0].transcript;
+                        if (event.results[i].isFinal) {
+                            finalTranscript += transcript;
+                        } else {
+                            interimTranscript += transcript;
+                        }
+                    }
+
+                    // 显示识别结果
+                    const displayText = finalTranscript + interimTranscript;
+                    if (displayText.trim()) {
+                        resultText.textContent = displayText;
+                        resultText.classList.remove('placeholder');
+                    }
+                };
+
+                recognition.onerror = function(event) {
+                    console.error('语音识别错误:', event.error);
+                    if (event.error === 'not-allowed') {
+                        showStatus('请允许使用麦克风权限', 'error');
+                    } else if (event.error === 'no-speech') {
+                        showStatus('未检测到语音，请重试', 'error');
+                    } else {
+                        showStatus('识别出错: ' + event.error, 'error');
+                    }
+                    stopRecording();
+                };
+
+                recognition.onend = function() {
+                    if (isRecording) {
+                        // 如果还在按住状态，自动重新开始
+                        try {
+                            recognition.start();
+                        } catch (e) {
+                            stopRecording();
+                        }
+                    } else {
+                        micBtn.classList.remove('recording');
+                        showStatus('录音结束', '');
+                    }
+                };
+
+                return true;
+            }
+
+            function startRecording() {
+                finalTranscript = '';
+                if (resultText.classList.contains('placeholder')) {
+                    resultText.textContent = '';
+                }
+                
+                try {
+                    recognition.start();
+                } catch (e) {
+                    console.error('开始录音失败:', e);
+                    showStatus('无法启动录音', 'error');
+                }
+            }
+
+            function stopRecording() {
+                isRecording = false;
+                micBtn.classList.remove('recording');
+                
+                try {
+                    recognition.stop();
+                } catch (e) {
+                    console.error('停止录音失败:', e);
+                }
+            }
+
+            function showStatus(message, type) {
+                statusDiv.textContent = message;
+                statusDiv.className = 'status';
+                if (type) {
+                    statusDiv.classList.add(type);
+                }
+            }
+
+            // 初始化
+            if (!initSpeechRecognition()) {
+                return;
+            }
+
+            // 处理触摸事件（移动端）
+            micBtn.addEventListener('touchstart', function(e) {
+                e.preventDefault();
+                startRecording();
+            }, { passive: false });
+
+            micBtn.addEventListener('touchend', function(e) {
+                e.preventDefault();
+                stopRecording();
+            });
+
+            // 处理鼠标事件（桌面端调试）
+            micBtn.addEventListener('mousedown', function(e) {
+                e.preventDefault();
+                startRecording();
+            });
+
+            micBtn.addEventListener('mouseup', function(e) {
+                e.preventDefault();
+                stopRecording();
+            });
+
+            micBtn.addEventListener('mouseleave', function(e) {
+                if (isRecording) {
+                    stopRecording();
+                }
+            });
+
+            // 防止页面滚动时的意外行为
+            document.addEventListener('touchmove', function(e) {
+                if (isRecording) {
+                    e.preventDefault();
+                }
+            }, { passive: false });
+
+        })();
+    </script>
+</body>
+</html>
